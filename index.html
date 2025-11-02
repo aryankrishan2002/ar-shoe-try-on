@@ -85,7 +85,8 @@
 
     <!-- Loading Message -->
     <div id="loading_message">
-        <p>Loading AR Model...</p>
+        <!-- UPDATED: Added an ID to the text for more detailed messages -->
+        <p id="loading_text">Loading AR Model...</p>
     </div>
 
     <!-- 
@@ -110,6 +111,8 @@
         const canvasCtx = canvasElement.getContext("2d");
         const loadingMessage = document.getElementById("loading_message");
         const threeCanvas = document.getElementById("three_canvas");
+        // UPDATED: Get the loading text element
+        const loadingText = document.getElementById("loading_text");
 
         // --- MediaPipe (Mission 5) Variables ---
         let poseLandmarker;
@@ -161,12 +164,15 @@
             directionalLight.position.set(0, 1, 2);
             scene.add(directionalLight);
 
+            // This function will now update the loading text
             loadShoeModel();
         }
 
         // --- Mission 6: Load 3D Shoe Model ---
         function loadShoeModel() {
             console.log("Loading shoe model...");
+            // UPDATED: Give user feedback
+            loadingText.innerHTML = "Loading 3D Shoe Model...";
             const loader = new GLTFLoader();
             
             // NOTE: Make sure your file is named "shoe.glb" and uploaded
@@ -176,6 +182,7 @@
                 shoeURL,
                 function (gltf) {
                     console.log("Shoe model loaded successfully!");
+                    loadingText.innerHTML = "3D Model Loaded."; // Success message
                     shoeModel = gltf.scene;
                     
                     // Start the shoe as invisible and very small
@@ -187,10 +194,10 @@
                 },
                 undefined, // onProgress callback (optional)
                 function (error) {
-                    // UPDATED: Better error handling, no alert()
+                    // UPDATED: Better error handling
                     console.error("Error loading shoe model: ", error);
                     loadingMessage.style.display = "block";
-                    loadingMessage.innerHTML = `<p style="color: red;">Error: Could not load 'shoe.glb'.<br/>Please make sure the file is uploaded to GitHub and the name is correct.</p>`;
+                    loadingText.innerHTML = `<p style="color: red;">Error: Could not load 'shoe.glb'.<br/>Please make sure the file is uploaded to GitHub and the name is correct.</p>`;
                 }
             );
         }
@@ -198,31 +205,39 @@
         // --- Mission 6: 3D Render Loop ---
         function animate3D() {
             requestAnimationFrame(animate3D);
-            
-            // We removed the test spin.
-            // The shoe's position is now controlled
-            // by the MediaPipe loop (predictWebcam)
-
-            // We must render the scene in this loop
             renderer.render(scene, camera);
         }
 
         // --- Mission 5: Load MediaPipe Model ---
         async function createPoseLandmarker() {
             console.log("Creating Pose Landmarker...");
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-            );
-            poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    // FIXED TYPO: Was 'pose_landmarke', now 'pose_landmarker'
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/pose_landmarker_lite.task`,
-                    delegate: "GPU"
-                },
-                runningMode: runningMode,
-                numPoses: 1 // Track one person
-            });
-            console.log("Pose Landmarker model loaded.");
+            // UPDATED: Give user feedback
+            loadingText.innerHTML = "Loading ML Model Files...";
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+                );
+                
+                loadingText.innerHTML = "Initializing ML Model... (This may take a moment)";
+                
+                poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/pose_landmarker_lite.task`,
+                        // UPDATED: Use "CPU" for maximum compatibility. 
+                        // "GPU" can fail silently on some devices.
+                        delegate: "CPU"
+                    },
+                    runningMode: runningMode,
+                    numPoses: 1 // Track one person
+                });
+                console.log("Pose Landmarker model loaded.");
+                loadingText.innerHTML = "ML Model Loaded.";
+
+            } catch(err) {
+                console.error("Error creating Pose Landmarker: ", err);
+                loadingText.innerHTML = `<p style="color: red;">Error loading ML Model.<br/>${err.message}.<br/>Please reload the page.</p>`;
+                throw err; // Stop the app from continuing
+            }
         }
 
         // --- Mission 4: Start the Camera ---
@@ -230,21 +245,26 @@
             try {
                 if (!poseLandmarker) {
                     console.log("Waiting for PoseLandmarker...");
-                    await createPoseLandmarker();
+                    loadingText.innerHTML = "Waiting for ML Model...";
+                    await createPoseLandmarker(); // This now has its own try/catch
                 }
 
-                loadingMessage.style.display = "none";
-
                 // --- Start the 3D world (Mission 6) ---
-                setupThreeJS();
-                animate3D(); // Start the 3D render loop
+                // This will set the loading text to "Loading 3D Shoe Model..."
+                setupThreeJS(); 
 
+                // Only proceed if shoeModel is being loaded (or loaded)
+                // We'll rely on the shoe loader to show an error if it fails
+                
+                loadingText.innerHTML = "Requesting Camera Access...";
+                
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "user" }
                 });
                 videoElement.srcObject = stream;
 
                 videoElement.addEventListener("loadeddata", () => {
+                    loadingMessage.style.display = "none"; // Hide loading message ONCE video starts
                     webcamRunning = true;
                     // Start the ML "Brain" loop (Mission 5 & 7)
                     predictWebcam();
@@ -252,7 +272,10 @@
             } catch (err) {
                 console.error("Error starting camera or loading model: ", err);
                 loadingMessage.style.display = "block";
-                loadingMessage.innerHTML = `<p style="color: red;">Error: Could not start.<br/>${err.message}</p>`;
+                // Check if the error is from createPoseLandmarker (which already set a message)
+                if (!loadingText.innerHTML.includes("Error")) {
+                     loadingText.innerHTML = `<p style="color: red;">Error: Could not start.<br/>${err.message}</p>`;
+                }
             }
         }
 
