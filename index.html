@@ -68,6 +68,7 @@
             font-family: sans-serif;
             font-size: 1.2rem;
             text-align: center;
+            width: 90%; /* Ensure it doesn't get too wide */
         }
     </style>
 </head>
@@ -169,7 +170,7 @@
             const loader = new GLTFLoader();
             
             // NOTE: Make sure your file is named "shoe.glb" and uploaded
-            const shoeURL = "shoe (1).glb"; 
+            const shoeURL = "shoe.glb"; 
 
             loader.load(
                 shoeURL,
@@ -186,8 +187,10 @@
                 },
                 undefined, // onProgress callback (optional)
                 function (error) {
+                    // UPDATED: Better error handling, no alert()
                     console.error("Error loading shoe model: ", error);
-                    alert("Could not load the 3D shoe model 'shoe.glb'. Make sure it's uploaded to GitHub.");
+                    loadingMessage.style.display = "block";
+                    loadingMessage.innerHTML = `<p style="color: red;">Error: Could not load 'shoe.glb'.<br/>Please make sure the file is uploaded to GitHub and the name is correct.</p>`;
                 }
             );
         }
@@ -212,7 +215,8 @@
             );
             poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
                 baseOptions: {
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarke/pose_landmarker_lite/float16/pose_landmarker_lite.task`,
+                    // FIXED TYPO: Was 'pose_landmarke', now 'pose_landmarker'
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/pose_landmarker_lite.task`,
                     delegate: "GPU"
                 },
                 runningMode: runningMode,
@@ -223,18 +227,18 @@
 
         // --- Mission 4: Start the Camera ---
         async function startCamera() {
-            if (!poseLandmarker) {
-                console.log("Waiting for PoseLandmarker...");
-                await createPoseLandmarker();
-            }
-
-            loadingMessage.style.display = "none";
-
-            // --- Start the 3D world (Mission 6) ---
-            setupThreeJS();
-            animate3D(); // Start the 3D render loop
-
             try {
+                if (!poseLandmarker) {
+                    console.log("Waiting for PoseLandmarker...");
+                    await createPoseLandmarker();
+                }
+
+                loadingMessage.style.display = "none";
+
+                // --- Start the 3D world (Mission 6) ---
+                setupThreeJS();
+                animate3D(); // Start the 3D render loop
+
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "user" }
                 });
@@ -246,16 +250,17 @@
                     predictWebcam();
                 });
             } catch (err) {
-                console.error("Error accessing the camera: ", err);
+                console.error("Error starting camera or loading model: ", err);
                 loadingMessage.style.display = "block";
-                loadingMessage.innerHTML = `<p style="color: red;">Error: Could not access camera.<br/>Please check permissions and reload.</p>`;
+                loadingMessage.innerHTML = `<p style="color: red;">Error: Could not start.<br/>${err.message}</p>`;
             }
         }
 
         // --- Mission 5 & 7: The "Brain" Loop (Detect & Connect) ---
         async function predictWebcam() {
             // Set canvas size to match video
-            if (canvasElement.width !== videoElement.videoWidth) {
+            if (videoElement.videoWidth > 0 && canvasElement.width !== videoElement.videoWidth) {
+                console.log("Resizing canvas to video dimensions");
                 canvasElement.width = videoElement.videoWidth;
                 canvasElement.height = videoElement.videoHeight;
                 // Also update 3D canvas and camera
@@ -329,7 +334,7 @@
                             // Map this distance to a 3D scale
                             // You will need to TWEAK this '0.001' number
                             // to make the shoe fit your foot perfectly.
-                            const scale = dist * 0.001; 
+                            const scale = dist * 0.0015; // Increased scale slightly
                             shoeModel.scale.set(scale, scale, scale);
 
                         } else {
@@ -371,7 +376,6 @@
         // ======================================================
         //  START THE APP
         // ======================================================
-        createPoseLandmarker();
         startCamera();
     </script>
 </body>
