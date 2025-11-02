@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- The <head> is for metadata and loading scripts -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Shoe Try-On</title>
+    
+    <style>
+        /* This CSS makes the video feed fill the entire screen */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevents scrollbars */
+            background-color: #000; /* Black background for loading */
+        }
+
+        #webcam {
+            /* Position the video to cover the whole screen */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Ensures the video fills the screen without stretching */
+            /* Flip the video horizontally so it acts like a mirror */
+            transform: scaleX(-1); 
+        }
+
+        /* NEW: Styles for the output canvas */
+        #output_canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Make it see-through for clicks */
+            /* Flip it to match the video */
+            transform: scaleX(-1);
+        }
+
+        /* NEW: Style for loading message */
+        #loading_message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: sans-serif;
+            font-size: 1.2rem;
+            text-align: center;
+        }
+    </style>
+
+</head>
+<body>
+    
+    <!-- 
+      Mission 4: The <video> element for the camera feed.
+    -->
+    <video id="webcam" autoplay playsinline muted></video>
+
+    <!-- 
+      NEW - Mission 5: The <canvas> for drawing landmarks.
+    -->
+    <canvas id="output_canvas"></canvas>
+
+    <!-- NEW: Loading Message -->
+    <div id="loading_message">
+        <p>Loading AR Model...</p>
+    </div>
+
+    <!-- 
+      Mission 4 & 5: JavaScript for Camera AND Pose Detection
+      This is now a 'module' to support importing.
+    -->
+    <script type="module">
+        // Import the MediaPipe components
+        import {
+            PoseLandmarker,
+            FilesetResolver,
+            DrawingUtils
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_bundle.js";
+
+        // --- Get HTML Elements ---
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById("output_canvas");
+        const canvasCtx = canvasElement.getContext("2d");
+        const loadingMessage = document.getElementById("loading_message");
+
+        // --- Mission 5: Pose Landmarker Setup ---
+        let poseLandmarker;
+        let runningMode = "VIDEO";
+        let webcamRunning = false;
+        const drawingUtils = new DrawingUtils(canvasCtx);
+
+        // This function loads the MediaPipe Pose Landmarker model
+        async function createPoseLandmarker() {
+            console.log("Creating Pose Landmarker...");
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+            );
+            poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    // Use the 'lite' model for better performance on phones
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/pose_landmarker_lite.task`,
+                    delegate: "GPU" // Use the GPU for faster processing
+                },
+                runningMode: runningMode,
+                numPoses: 1 // We only want to track one person
+            });
+            console.log("Pose Landmarker model loaded.");
+        }
+
+        // --- Mission 4: Camera Setup (Modified) ---
+        async function startCamera() {
+            // Wait for the Pose Landmarker to be created first
+            if (!poseLandmarker) {
+                console.log("Waiting for PoseLandmarker...");
+                await createPoseLandmarker();
+            }
+
+            // Now that the model is loaded, hide the loading message
+            loadingMessage.style.display = "none";
+
+            try {
+                // Ask the user for permission to use the camera
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "user" } // Use the front camera (like a mirror)
+                });
+                videoElement.srcObject = stream;
+
+                // Add an event listener to start the prediction loop
+                // once the video is ready
+                videoElement.addEventListener("loadeddata", () => {
+                    webcamRunning = true;
+                    // Start the prediction loop
+                    predictWebcam();
+                });
+            } catch (err) {
+                // Log any errors to the console
+                console.error("Error accessing the camera: ", err);
+                // Display a user-friendly error message instead of an alert
+                loadingMessage.style.display = "block";
+                loadingMessage.innerHTML = `<p style="color: red;">Error: Could not access camera.<br/>Please check permissions and reload.</p>`;
+            }
+        }
+
+        // --- NEW - Mission 5: The "Game Loop" ---
+        let lastVideoTime = -1;
+        async function predictWebcam() {
+            // Set the canvas size to match the video dimensions
+            // This is important for drawing the landmarks accurately
+            if (canvasElement.width !== videoElement.videoWidth) {
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+            }
+
+            // Get the current time
+            const startTimeMs = performance.now();
+
+            // Run detection only if the video has a new frame
+            if (videoElement.currentTime !== lastVideoTime) {
+                lastVideoTime = videoElement.currentTime;
+                
+                // This is the core ML function
+                poseLandmarker.detectForVideo(videoElement, startTimeMs, (result) => {
+                    // Clear the canvas
+                    canvasCtx.save();
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    
+                    // Check if we have any landmarks
+                    if (result.landmarks && result.landmarks.length > 0) {
+                        // Draw the landmarks and connectors
+                        for (const landmark of result.landmarks) {
+                            drawingUtils.drawLandmarks(landmark, {
+                                radius: (data) => DrawingUtils.lerp(data.from.z, -0.15, 0.1, 5, 1)
+                            });
+                            drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
+                        }
+                    }
+                    
+                    canvasCtx.restore();
+                });
+            }
+
+            // Keep the loop running
+            if (webcamRunning) {
+                window.requestAnimationFrame(predictWebcam);
+            }
+        }
+
+        // --- Start Everything ---
+        // 1. Start loading the model AND
+        // 2. Start the camera (which will wait for the model)
+        // We run them in parallel. startCamera() will await the model if it's not ready.
+        createPoseLandmarker();
+        startCamera();
+    </script>
+
+</body>
+</html>
+
